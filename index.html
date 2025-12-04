@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Chennai Hazard-Aware Path Finder</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+
+      body {
+        font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f5f6fa;
+        color: #1e1e24;
+      }
+
+      header {
+        background: linear-gradient(135deg, #1c7ed6, #74c0fc);
+        padding: 1.5rem;
+        color: white;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      main {
+        padding: 1.5rem;
+      }
+
+      h1 {
+        margin: 0 0 0.5rem;
+      }
+
+      p.subtitle {
+        margin: 0;
+        font-size: 1rem;
+        opacity: 0.9;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.75rem;
+        background-color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+      }
+
+      input[type="number"] {
+        width: 100%;
+        padding: 0.5rem;
+        border-radius: 4px;
+        border: 1px solid #ced4da;
+        font-size: 0.95rem;
+      }
+
+      button {
+        grid-column: span 2;
+        padding: 0.75rem 1.5rem;
+        background-color: #1c7ed6;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+      }
+
+      button:hover {
+        background-color: #1864ab;
+      }
+
+      #map-container {
+        position: relative;
+        height: 600px;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      }
+
+      #error {
+        color: #c92a2a;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+      }
+
+      .legend {
+        position: absolute;
+        z-index: 1000;
+        bottom: 16px;
+        right: 16px;
+        background-color: rgba(255, 255, 255, 0.92);
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        font-size: 0.85rem;
+      }
+
+      .legend h4 {
+        margin: 0 0 0.5rem 0;
+        font-size: 0.9rem;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.35rem;
+      }
+
+      .legend-swatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        margin-right: 0.5rem;
+      }
+
+      footer {
+        padding: 1rem 1.5rem;
+        text-align: center;
+        color: #5c5f66;
+        font-size: 0.85rem;
+      }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    {{ map_html | safe }}
+  </head>
+  <body>
+    <header>
+      <h1>Chennai Hazard-Aware Path Finder</h1>
+      <p class="subtitle">
+        Calculate safe travel routes by avoiding flood zones in Chennai, Tamil
+        Nadu.
+      </p>
+    </header>
+    <main>
+      <form id="pathForm">
+        <div>
+          <label for="start_lat">Start Latitude</label>
+          <input
+            type="number"
+            step="0.0001"
+            id="start_lat"
+            name="start_lat"
+            value="13.0400"
+            min="{{ lat_min }}"
+            max="{{ lat_max }}"
+            required
+          />
+        </div>
+        <div>
+          <label for="start_lon">Start Longitude</label>
+          <input
+            type="number"
+            step="0.0001"
+            id="start_lon"
+            name="start_lon"
+            value="80.2150"
+            min="{{ lon_min }}"
+            max="{{ lon_max }}"
+            required
+          />
+        </div>
+        <div>
+          <label for="end_lat">Destination Latitude</label>
+          <input
+            type="number"
+            step="0.0001"
+            id="end_lat"
+            name="end_lat"
+            value="{{ lat_max }}"
+            min="{{ lat_min }}"
+            max="{{ lat_max }}"
+            required
+          />
+        </div>
+        <div>
+          <label for="end_lon">Destination Longitude</label>
+          <input
+            type="number"
+            step="0.0001"
+            id="end_lon"
+            name="end_lon"
+            value="{{ lon_max }}"
+            min="{{ lon_min }}"
+            max="{{ lon_max }}"
+            required
+          />
+        </div>
+        <button type="submit">Find safest path</button>
+      </form>
+
+      <div id="error"></div>
+      <div id="map-container"></div>
+    </main>
+
+    <footer>
+      Coordinate bounds supported by the demo: Latitude {{ lat_min }} – {{
+      lat_max }}, Longitude {{ lon_min }} – {{ lon_max }}.
+    </footer>
+
+    <script>
+      let pathLayers = [];
+      let hazardCircles = [];
+
+      function attachLegend(mapContainer) {
+        const legend = document.createElement("div");
+        legend.className = "legend";
+        legend.innerHTML = `
+          <h4>Legend</h4>
+          <div class="legend-item">
+            <span class="legend-swatch" style="background-color: #28a745"></span>
+            Safe path
+          </div>
+          <div class="legend-item">
+            <span class="legend-swatch" style="background-color: #B8860B"></span>
+            Flood / no-go zone
+          </div>
+          <div class="legend-item">
+            <span class="legend-swatch" style="background-color: #8B0000"></span>
+            Accident / construction zone
+          </div>
+        `;
+        mapContainer.appendChild(legend);
+      }
+
+      function renderInfluenceZones(features) {
+        if (!window.map || !window.L || !window.turf) return;
+        hazardCircles.forEach((layer) => window.map.removeLayer(layer));
+        hazardCircles = [];
+
+        features.forEach((feature) => {
+          const radius = feature.properties.influence_radius_m;
+          const centroid = turf.centroid(feature);
+          const [lon, lat] = centroid.geometry.coordinates;
+          const circle = L.circle([lat, lon], {
+            radius,
+            color:
+              feature.properties.category === "Flood" ? "#B8860B" : "#8B0000",
+            fillColor: "#ffffff",
+            fillOpacity: 0.08,
+            dashArray: "4 6",
+            weight: 1,
+          }).addTo(window.map);
+          circle.bindPopup(
+            `<strong>${feature.properties.name}</strong><br/>${
+              feature.properties.category
+            } risk<br/>Severity: ${(feature.properties.severity * 100).toFixed(
+              0
+            )}%<br/>${feature.properties.description}`
+          );
+          hazardCircles.push(circle);
+        });
+      }
+
+      function fetchHazards() {
+        return $.getJSON("/hazards").then((geojson) => {
+          renderInfluenceZones(geojson.features);
+          return geojson;
+        });
+      }
+
+      function initializeMapContainer() {
+        const mapContainer = document.getElementById("map-container");
+        const mapElement = document.querySelector("div.leaflet-container");
+
+        if (!mapContainer || !mapElement) {
+          // Try again when the map is ready
+          requestAnimationFrame(initializeMapContainer);
+          return;
+        }
+
+        mapContainer.appendChild(mapElement.parentElement);
+        attachLegend(mapContainer);
+      }
+
+      $(document).ready(function () {
+        initializeMapContainer();
+
+        const turfScript = document.createElement("script");
+        turfScript.src =
+          "https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js";
+        turfScript.onload = () => fetchHazards();
+        document.head.appendChild(turfScript);
+
+        $("#pathForm").on("submit", function (event) {
+          event.preventDefault();
+          $("#error").text("");
+          pathLayers.forEach((layer) => {
+            if (window.map && window.map.hasLayer(layer)) {
+              window.map.removeLayer(layer);
+            }
+          });
+          pathLayers = [];
+
+          const payload = {
+            start_lat: parseFloat($("#start_lat").val()),
+            start_lon: parseFloat($("#start_lon").val()),
+            end_lat: parseFloat($("#end_lat").val()),
+            end_lon: parseFloat($("#end_lon").val()),
+          };
+
+          $.ajax({
+            url: "/find_path",
+            method: "POST",
+            contentType: "application/json",
+            data: JSON.stringify(payload),
+          })
+            .done(function (response) {
+              if (!response.paths || response.paths.length === 0) {
+                $("#error").text("No safe paths found.");
+                return;
+              }
+
+              const colors = ["#28a745", "#00FF00", "#32CD32"]; // Green shades for alternative routes
+              response.paths.forEach((path, index) => {
+                const latlngs = path.map((coord) => [coord[0], coord[1]]);
+                if (!window.map) return;
+                const pathLayer = L.polyline(latlngs, {
+                  color: colors[index % colors.length],
+                  weight: 5 - index, // Decreasing weight for alternatives
+                  opacity: 0.8 - index * 0.2, // Decreasing opacity
+                }).addTo(window.map);
+                pathLayers.push(pathLayer);
+              });
+
+              // Fit bounds to the first (primary) path
+              if (pathLayers.length > 0) {
+                window.map.fitBounds(pathLayers[0].getBounds(), {
+                  padding: [24, 24],
+                });
+              }
+            })
+            .fail(function (xhr) {
+              const errorMessage =
+                xhr.responseJSON?.error || "Unable to compute safe paths.";
+              $("#error").text(errorMessage);
+            });
+        });
+      });
+    </script>
+  </body>
+</html>
